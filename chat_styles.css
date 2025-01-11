@@ -1,0 +1,52 @@
+#chat-history {
+  height: 600px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+  background-color: #f9f9f9;
+}
+
+.chatbot-message.user {
+  background-color: #007BFF;
+  color: white;
+  padding: 8px;
+  border-radius: 8px;
+  margin: 5px 0;
+  text-align: right;
+}
+
+.chatbot-message.model {
+  background-color: #e5e7eb;
+  color: black;
+  padding: 8px;
+  border-radius: 8px;
+  margin: 5px 0;
+  text-align: left;
+}
+
+#input-box {
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  padding: 10px;
+  font-size: 16px;
+  width: 100%;
+}
+
+#submit-btn {
+  background-color: #007BFF;
+  color: white;
+  font-size: 14px;
+  border: none;
+  border-radius: 5px;
+  padding: 10px;
+  cursor: pointer;
+}
+
+#submit-btn:hover {
+  background-color: #0056b3;
+}
+
+div.svelte-iyf88w {
+  background: transparent !important;
+}

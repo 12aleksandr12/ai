@@ -1,0 +1,12 @@
+services:
+  ai:
+    build:
+      context: .
+    ports:
+      - "7860:7860"
+      - "11435:11434"
+    environment:
+      - PYTORCH_ENABLE_MPS_FALLBACK=1
+    volumes:
+      - .:/app
+    working_dir: /app
