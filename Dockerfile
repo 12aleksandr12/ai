@@ -15,8 +15,9 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
 # Скопируем проект
 COPY . .
 
-# Укажем порт, если используется Gradio
+ENV PYTHONPATH=/app
+
+# Let's specify the port if Gradio is used
 EXPOSE 7860
 
-# Запускаем приложение
-CMD ["python", "main_app.py"]
+CMD ["python", "project_name/main.py"]

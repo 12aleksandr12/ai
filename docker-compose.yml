@@ -7,6 +7,7 @@ services:
       - "11435:11434"
     environment:
       - PYTORCH_ENABLE_MPS_FALLBACK=1
+      - PYTHONPATH=/app
     volumes:
       - .:/app
     working_dir: /app

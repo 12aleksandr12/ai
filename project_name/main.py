@@ -1,7 +1,5 @@
 import gradio as gr
-from app import create_app as create_app1
-from app2 import create_app as create_app2
-from config import models  # Импорт списка моделей
+from project_name import create_ollama_chat, create_gpt_chat, models_app
 
 def main():
     # print("Loaded CSS:")
@@ -20,16 +18,16 @@ def main():
             label="Выберите интерфейс"
         )
 
-        with gr.Group(visible=True) as interface_1_container:
-            create_app1(models)  # Передаем список моделей
+        with gr.Group(visible=True) as interface_ollama_chat:
+            create_ollama_chat(models_app)
 
-        with gr.Group(visible=False) as interface_2_container:
-            create_app2(models)  # Передаем список моделей
+        with gr.Group(visible=False) as interface_gpt_chat:
+            create_gpt_chat(models_app)
 
         interface_selector.change(
             switch_interface,
             inputs=[interface_selector],
-            outputs=[interface_1_container, interface_2_container]
+            outputs=[interface_ollama_chat, interface_gpt_chat]
         )
 
     demo.launch(server_name="0.0.0.0", server_port=7860)
