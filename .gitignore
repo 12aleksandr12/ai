@@ -36,3 +36,4 @@ codecept.phar
 venv
 node_modules
 __pycache__/
+project-structure.txt
