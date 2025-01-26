@@ -17,6 +17,7 @@ COPY . .
 
 #RUN tree -a -I ".gigaide|.git|.idea|.DS_Store|__pycache__|venv|project-structure.txt" > project-structure.txt
 RUN tree -a -I ".gigaide|.git|.idea|.DS_Store|__pycache__|venv|project-structure.txt" | sed 's/\xC2\xA0/ /g' > project-structure.txt
+#yt-dlp -F https://www.youtube.com/watch?v=VIDEO_ID
 #yt-dlp -f best "link to video"
 #ffmpeg -i "video name" -i "audoi name" -c:v copy -c:a copy "new name file.mp4"
 
