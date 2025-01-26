@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <h1>Скачивание видео с YouTube</h1>
+    <form method="POST">
+        <label for="url">Введите ссылку на видео:</label>
+        <input type="text" id="url" name="url" required>
+
+        <label for="quality">Выберите качество:</label>
+        <select id="quality" name="quality">
+            <option value="bestvideo+bestaudio/best">Лучшее качество</option>
+            <option value="bestvideo[height<=1080]+bestaudio">1080p</option>
+            <option value="bestvideo[height<=720]+bestaudio">720p</option>
+            <option value="worst">Низкое качество</option>
+        </select>
+
+        <button type="submit">Скачать</button>
+    </form>
+</div>
+</body>
+</html>

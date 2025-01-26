@@ -54,7 +54,7 @@ def create_app(models):
                     placeholder="Введите текстовый запрос...",
                     label="Запрос",
                     lines=1,  # Однострочный ввод для отправки при Enter
-                    max_lines=1
+                    max_lines=5
                 )
             with gr.Column(scale=1):  # Кнопка занимает 1%
                 submit_button = gr.Button("Отправить", size="small")

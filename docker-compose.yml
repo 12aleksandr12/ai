@@ -12,3 +12,30 @@ services:
       - .:/app
       - ./static:/app/static
     working_dir: /app
+
+  flask_app:
+    build:
+      context: ./flask_app
+    ports:
+      - "5001:5001"
+    environment:
+      - FLASK_ENV=production
+    volumes:
+      - ./flask_app:/app
+      - ./downloads:/app/downloads
+    working_dir: /app
+    command: flask run --host=0.0.0.0 --port=5001
+
+  gradio_ui:
+    build:
+      context: ./gradio_ui
+    ports:
+      - "7861:7860"
+    depends_on:
+      - flask_app
+    environment:
+      - FLASK_API_URL=http://flask_app:5001
+    volumes:
+      - ./gradio_ui:/app
+    working_dir: /app
+    command: python main.py
