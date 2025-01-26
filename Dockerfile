@@ -4,6 +4,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
     tree \
+    yt-dlp \
+    ffmpeg \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -15,6 +17,8 @@ COPY . .
 
 #RUN tree -a -I ".gigaide|.git|.idea|.DS_Store|__pycache__|venv|project-structure.txt" > project-structure.txt
 RUN tree -a -I ".gigaide|.git|.idea|.DS_Store|__pycache__|venv|project-structure.txt" | sed 's/\xC2\xA0/ /g' > project-structure.txt
+#yt-dlp -f best "link to video"
+#ffmpeg -i "video name" -i "audoi name" -c:v copy -c:a copy "new name file.mp4"
 
 ENV PYTHONPATH=/app
 
