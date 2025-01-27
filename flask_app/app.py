@@ -4,7 +4,8 @@ import os
 
 app = Flask(__name__)
 
-DOWNLOAD_FOLDER = "downloads"
+# Путь к папке Downloads внутри контейнера
+DOWNLOAD_FOLDER = "/app/downloads"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
 @app.route("/")
@@ -17,18 +18,32 @@ def download_video():
     url = data.get("url")
     quality = data.get("quality")
 
+    if not url or not quality:
+        return jsonify({"error": "URL и качество должны быть указаны"}), 400
+
+    # Убираем ненужные части формата
+    quality = quality.split(" - ")[0]
+
     options = {
         'outtmpl': f"{DOWNLOAD_FOLDER}/%(title)s.%(ext)s",
         'format': quality,
-        'merge_output_format': 'mp4'
+        'merge_output_format': 'mp4',
+        'postprocessors': [
+            {
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4'
+            }
+        ]
     }
 
     with YoutubeDL(options) as ydl:
         try:
             info_dict = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info_dict).replace('.webm', '.mp4').replace('.mkv', '.mp4')
+            app.logger.info(f"Скачивание завершено: {filename}")
             return jsonify({"filename": filename})
         except Exception as e:
+            app.logger.error(f"Ошибка при скачивании: {str(e)}")
             return jsonify({"error": str(e)}), 400
 
 if __name__ == "__main__":
