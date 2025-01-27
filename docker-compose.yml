@@ -20,6 +20,7 @@ services:
       - "5001:5001"
     environment:
       - FLASK_ENV=production
+      - HOME=${HOME}/Downloads
     volumes:
       - ./flask_app:/app
       - ${HOME}/Downloads:/app/downloads

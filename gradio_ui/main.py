@@ -80,12 +80,22 @@ def create_download_interface():
 
     return download_section
 
+def clean_quality_string(quality):
+    # Извлекаем ID качества (например, "137" или "22") и разрешение/формат
+    quality_id = quality.split(" - ")[0]
+
+    # Пример: можно извлечь тип медиафайла из строки, предполагая что будет что-то вроде "audio" или "video"
+    media_type = "audio" if "audio" in quality.lower() else "video"
+
+    return quality_id, media_type
+
 # Функция для скачивания видео
 def download_video(url, quality):
     try:
+        quality_id, media_type = clean_quality_string(quality)
         response = requests.post(
             f"{FLASK_SERVER_URL}/download",
-            json={"url": url, "quality": quality},
+            json={"url": url, "quality": quality_id, "media_type": media_type},
             timeout=15
         )
         if response.status_code == 200:
@@ -127,12 +137,8 @@ def main():
         url_input.change(enable_download_button, inputs=[url_input, quality_input], outputs=[download_button])
         quality_input.change(enable_download_button, inputs=[url_input, quality_input], outputs=[download_button])
 
-        def clean_quality_string(quality):
-            return quality.split(" - ")[0]  # Извлекаем только числовой ID формата
-
-        # Обработчик кнопки скачивания
         download_button.click(
-            fn=lambda url, quality: download_video(url, clean_quality_string(quality)),
+            fn=lambda url, quality: download_video(url, quality),
             inputs=[url_input, quality_input],
             outputs=[output_text]
         )
