@@ -6,11 +6,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tree \
     yt-dlp \
     ffmpeg \
+    gcc \
+    g++ \
+    make \
+    libespeak-ng1 \
+    liblapack-dev \
+    libatlas-base-dev \
+    gfortran \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir setuptools wheel \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY . .

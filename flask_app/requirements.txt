@@ -1,2 +1,10 @@
 flask
 yt-dlp
+spacy==3.8.3
+cython<3.0,>=0.29.0
+numpy==1.21.2
+faster-whisper
+argostranslate
+TTS
+ffmpeg-python
+whisper
