@@ -43,7 +43,7 @@ def create_app(models):
             with gr.Column(scale=1, min_width=200):  # Сужаем сайдбар
                 model_dropdown = gr.Dropdown(
                     choices=models,
-                    value="qwen2.5-coder:3b",
+                    value="qwen2.5-coder:7b",
                     label="Выберите модель"
                 )
 
