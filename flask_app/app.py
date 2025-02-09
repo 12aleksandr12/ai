@@ -9,7 +9,6 @@ import ffmpeg
 import logging
 
 app = Flask(__name__)
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -26,12 +25,22 @@ LANGUAGES = {
     "ru": "Russian"
 }
 
+def sanitize_filename(filename):
+    """Заменяет пробелы на подчёркивания."""
+    return filename.replace(" ", "_")
+
+def generate_unique_temp_filename(ext):
+    """Генерирует уникальное имя временного файла с заданным расширением."""
+    return f"/tmp/temp{ext}_{uuid.uuid4()}{ext}"
+
 @app.route("/")
 def home():
+    logger.info("Запрос к домашней странице")
     return jsonify({"message": "Flask server is running!"})
 
 @app.route("/languages", methods=["GET"])
 def get_languages():
+    logger.info("Запрос к списку языков")
     return jsonify(LANGUAGES)
 
 @app.route("/download", methods=["POST"])
@@ -44,65 +53,100 @@ def download_video():
 
     logger.info("Язык перевода: %s", target_lang)
 
-    if not url or not quality or not media_type:
-        return jsonify({"error": "URL, качество, тип медиа должны быть указаны"}), 400
-
-    logger.info("Начинается загрузка видео: %s", url)
-
-    quality = quality.split(" - ")[0]
-    options = {
-        'outtmpl': f"{DOWNLOAD_FOLDER}/%(title)s.%(ext)s",
-        'format': 'bestaudio' if media_type == "audio" else f"{quality}+bestaudio",
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'aac',
-            'preferredquality': '192'
-        }] if media_type == "audio" else []
-    }
+    # Проверка входных данных
+    if not all([url, quality, media_type]):
+        logger.error("Не все входные данные указаны")
+        return jsonify({"error": "URL, качество и тип медиа должны быть указаны"}), 400
 
     try:
+        # Загрузка видео или аудио
+        logger.info("Начинается загрузка видео: %s", url)
+        quality = quality.split(" - ")[0]
+        options = {
+            'outtmpl': f"{DOWNLOAD_FOLDER}/%(title)s.%(ext)s",
+            'format': 'bestaudio' if media_type == "audio" else f"{quality}+bestaudio",
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'aac',
+                'preferredquality': '192'
+            }] if media_type == "audio" else []
+        }
+
         with YoutubeDL(options) as ydl:
             info_dict = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info_dict)
 
+        # Логирование полного пути к скачанному файлу
+        full_filename = os.path.join(DOWNLOAD_FOLDER, filename)
+        logger.info("Скачанный файл: %s", full_filename)
+
+        # Проверка существования скачанного файла
+        if not os.path.exists(full_filename):
+            logger.error("Скачанный файл не найден: %s", full_filename)
+            return jsonify({"error": "Скачанный файл не найден"}), 500
+
+        # Генерация уникального имени файла с заменой пробелов
         unique_id = str(uuid.uuid4())[:3]
         base, ext = os.path.splitext(filename)
-        new_filename = f"{base}_{unique_id}{ext}"
-        os.rename(filename, new_filename)
+        new_filename = sanitize_filename(f"{base}_{unique_id}{ext}")
+        new_full_filename = os.path.join(DOWNLOAD_FOLDER, new_filename)
+        os.rename(full_filename, new_full_filename)
+        logger.info("Загрузка завершена: %s", new_full_filename)
 
-        logger.info("Загрузка завершена: %s", new_filename)
-
-        translated_audio = process_audio(new_filename, target_lang)
+        # Обработка аудио
+        translated_audio = process_audio(new_full_filename, target_lang)
         if not translated_audio:
             return jsonify({"error": "Ошибка обработки аудио"}), 500
 
+        # Если это аудио, возвращаем результат
         if media_type == "audio":
             return jsonify({"filename": os.path.basename(translated_audio)})
 
-        final_video = merge_audio_with_video(new_filename, translated_audio)
+        # Объединение видео и аудио
+        final_video = merge_audio_with_video(new_full_filename, translated_audio)
         if not final_video:
             return jsonify({"error": "Ошибка объединения видео и аудио"}), 500
 
         return jsonify({"filename": os.path.basename(final_video)})
+
     except Exception as e:
         logger.exception("Ошибка загрузки видео: %s", str(e))
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": str(e)}), 500
 
 def process_audio(audio_path, target_lang):
     logger.info("Начинается обработка аудио: %s", audio_path)
+
     try:
-        audio_ext = os.path.splitext(audio_path)[1]
+        # Нормализация пути к аудиофайлу
+        full_audio_path = os.path.normpath(os.path.abspath(audio_path))
+        logger.info("Полный путь к аудиофайлу: %s", full_audio_path)
+
+        # Проверка существования аудиофайла
+        if not os.path.exists(full_audio_path):
+            logger.error("Аудиофайл не найден: %s", full_audio_path)
+            return None
+
+        # Конвертация в WAV (если нужно)
+        audio_ext = os.path.splitext(full_audio_path)[1]
         if audio_ext != ".wav":
-            converted_audio_path = audio_path.replace(audio_ext, ".wav")
-            logger.info("Конвертация в WAV: %s -> %s", audio_path, converted_audio_path)
-            ffmpeg.input(audio_path).output(converted_audio_path, format="wav").run()
-            audio_path = converted_audio_path
+            converted_audio_path = full_audio_path.replace(audio_ext, ".wav")
+            logger.info("Конвертация в WAV: %s -> %s", full_audio_path, converted_audio_path)
+            ffmpeg.input(full_audio_path).output(converted_audio_path, format="wav").overwrite_output().run()
+            full_audio_path = converted_audio_path
+            logger.info("Конвертированный аудиофайл: %s", full_audio_path)
 
-        transcript = whisper_model.transcribe(audio_path)["text"]
+        # Проверка существования конвертированного аудиофайла
+        if not os.path.exists(full_audio_path):
+            logger.error("Конвертированный аудиофайл не найден: %s", full_audio_path)
+            return None
+
+        # Распознавание текста с помощью Whisper
+        transcript = whisper_model.transcribe(full_audio_path)["text"]
         logger.info("Распознанный текст (первые 100 символов): %s", transcript[:100])
-
         logger.info("Начинаю перевод с en на %s", target_lang)
+
         try:
+            # Перевод текста
             translated_text = translate.translate(transcript, "en", target_lang)
             if not translated_text:
                 raise ValueError("Ошибка: переводчик для указанного языка не найден")
@@ -111,44 +155,120 @@ def process_audio(audio_path, target_lang):
             logger.error("Ошибка перевода текста: %s", str(e))
             return None
 
-        translated_audio_path = audio_path.replace(".wav", "_translated.wav")
+        # Генерация аудио с помощью gTTS
+        translated_audio_path = full_audio_path.replace(".wav", "_translated.opus")
         logger.info("Генерация аудио: %s", translated_audio_path)
         tts = gTTS.gTTS(translated_text, lang=target_lang)
         tts.save(translated_audio_path)
-
         logger.info("Аудио перевода сохранено: %s", translated_audio_path)
-        return translated_audio_path
+
+        # Проверка существования переведённого аудиофайла
+        if not os.path.exists(translated_audio_path):
+            logger.error("Переведённый аудиофайл не найден: %s", translated_audio_path)
+            return None
+
+        # Преобразование переведённого аудио в формат libopus
+        temp_audio_path = generate_unique_temp_filename(".opus")
+        logger.info("Преобразование аудио в libopus: %s -> %s", translated_audio_path, temp_audio_path)
+        try:
+            ffmpeg.input(translated_audio_path).output(temp_audio_path, acodec="libopus").overwrite_output().run()
+        except ffmpeg.Error as e:
+            logger.error("FFmpeg ошибка при преобразовании аудио: %s", e.stderr.decode('utf-8') if e.stderr else "Неизвестная ошибка")
+            return None
+
+        # Проверка существования временного аудиофайла
+        if not os.path.exists(temp_audio_path):
+            logger.error("Временный аудиофайл не найден: %s", temp_audio_path)
+            return None
+
+        logger.info("Временный аудиофайл создан: %s", temp_audio_path)
+
+        return temp_audio_path
+
     except Exception as e:
         logger.exception("Ошибка в process_audio: %s", str(e))
         return None
 
 def merge_audio_with_video(video_path, audio_path):
     logger.info("Начинается объединение аудио с видео: %s + %s", video_path, audio_path)
+
     try:
-        output_path = video_path.replace(".webm", "_translated.webm")
+        # Нормализация путей к файлам
+        full_video_path = os.path.normpath(os.path.abspath(video_path))
+        full_audio_path = os.path.normpath(os.path.abspath(audio_path))
+        logger.info("Полный путь к видео: %s", full_video_path)
+        logger.info("Полный путь к аудио: %s", full_audio_path)
+
+        # Проверка существования видеофайла
+        if not os.path.exists(full_video_path):
+            logger.error("Видео файл не найден: %s", full_video_path)
+            return None
+
+        # Проверка существования аудиофайла
+        if not os.path.exists(full_audio_path):
+            logger.error("Аудио файл не найден: %s", full_audio_path)
+            return None
+
+        # Определение формата выходного файла
+        _, video_ext = os.path.splitext(full_video_path)
+        output_path = full_video_path.replace(video_ext, "_translated.webm")
         logger.info("Файл результата: %s", output_path)
 
+        # Удаление существующего файла результата
         if os.path.exists(output_path):
             os.remove(output_path)
-            logger.info("Оригинальное аудио удалено: %s", output_path)
+            logger.info("Оригинальное видео удалено: %s", output_path)
 
-        # Преобразование аудио в формат libopus и сохранение во временный файл
-        temp_audio_path = "/tmp/temp_audio.opus"
-        ffmpeg.input(audio_path).output(temp_audio_path, acodec="libopus").run()
+        # Создание уникального временного файла для перекодированного видео
+        temp_video_path = generate_unique_temp_filename(".webm")
+        logger.info("Перекодировка видео в VP9: %s -> %s", full_video_path, temp_video_path)
 
-        # Загружаем видео
-        video = ffmpeg.input(video_path, format="webm")
+        # Перекодировка видео в VP9 без аудио
+        try:
+            ffmpeg.input(full_video_path, format="matroska").output(
+                temp_video_path,
+                vcodec="libvpx-vp9",
+                crf=30,
+                b="1M",
+                an=None  # Отключаем аудио
+            ).overwrite_output().run()
+        except ffmpeg.Error as e:
+            logger.error("FFmpeg ошибка при перекодировке видео: %s", e.stderr.decode('utf-8') if e.stderr else "Неизвестная ошибка")
+            return None
 
+        # Проверка существования временного видеофайла
+        if not os.path.exists(temp_video_path):
+            logger.error("Временный видеофайл не найден: %s", temp_video_path)
+            return None
+
+        logger.info("Временный видеофайл создан: %s", temp_video_path)
+
+        # Загружаем перекодированное видео
+        video = ffmpeg.input(temp_video_path)
+        # Загружаем аудио
+        audio = ffmpeg.input(full_audio_path)
         # Объединяем видео и аудио, передавая потоки в output
-        audio = ffmpeg.input(temp_audio_path)
-        ffmpeg.output(video, audio, output_path, vcodec="copy", acodec="libopus").overwrite_output().run()
+        ffmpeg_output = ffmpeg.output(video, audio, output_path, vcodec="copy", acodec="libopus")
+        logger.info("Объединяем видео и аудио: %s + %s -> %s", temp_video_path, full_audio_path, output_path)
+        try:
+            ffmpeg_output.overwrite_output().run()
+        except ffmpeg.Error as e:
+            logger.error("FFmpeg ошибка при объединении: %s", e.stderr.decode('utf-8') if e.stderr else "Неизвестная ошибка")
+            return None
 
-        # Удаляем временный файл
-        os.remove(temp_audio_path)
+        # Проверка существования файла результата
+        if not os.path.exists(output_path):
+            logger.error("Файл результата не найден: %s", output_path)
+            return None
 
-        logger.info("Видео с замененным аудио сохранено: %s", output_path)
+        logger.info("Файл результата создан: %s", output_path)
+
+        # Удаление временных файлов
+        os.remove(temp_video_path)
+        logger.info("Временный видеофайл удалён: %s", temp_video_path)
 
         return output_path
+
     except Exception as e:
         logger.exception("Ошибка в merge_audio_with_video: %s", str(e))
         return None
