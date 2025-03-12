@@ -1,3 +1,6 @@
+vosk
+pydub
+numpy
 flask
 yt-dlp
 openai-whisper
