@@ -1,1 +1,1 @@
-FLASK_API_URL = "http://flask_app:5001"
+FLASK_API_URL = "http://flask:5001"

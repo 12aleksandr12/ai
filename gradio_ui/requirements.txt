@@ -1,2 +1,3 @@
 gradio
 requests
+yt-dlp>=2024.3.10

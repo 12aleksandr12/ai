@@ -13,16 +13,23 @@ services:
       - ./static:/app/static
     working_dir: /app
 
-  flask_app:
+  # Имя сервиса = DNS в сети compose. Нельзя «flask_app»: подчёркивание в Host ломает Werkzeug 3.2+ (_host_re).
+  flask:
     build:
       context: ./flask_app
     ports:
       - "5001:5001"
     environment:
+      - FLASK_APP=app.py
       - FLASK_ENV=production
-      - HOME=${HOME}/Downloads
+      - DOWNLOAD_FOLDER=/app/downloads
+      # Whisper на CPU: без лимита — 500%+ CPU в Docker; base быстрее small (качество чуть ниже).
+      - WHISPER_MODEL=base
+      - WHISPER_CPU_THREADS=2
     volumes:
       - ./flask_app:/app
+      - ./templates:/app/templates
+      - ./static:/app/static
       - ${HOME}/Downloads:/app/downloads
     working_dir: /app
     command: flask run --host=0.0.0.0 --port=5001
@@ -33,9 +40,9 @@ services:
     ports:
       - "7861:7860"
     depends_on:
-      - flask_app
+      - flask
     environment:
-      - FLASK_API_URL=http://flask_app:5001
+      - FLASK_API_URL=http://flask:5001
     volumes:
       - ./gradio_ui:/app
     working_dir: /app

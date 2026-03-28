@@ -3,26 +3,162 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Downloader</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>YouTube: скачать и перевести озвучку</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/download_video_audio.css') }}">
 </head>
 <body>
 <div class="container">
-    <h1>Скачивание видео с YouTube</h1>
-    <form method="POST">
-        <label for="url">Введите ссылку на видео:</label>
-        <input type="text" id="url" name="url" required>
+    <h1>YouTube: видео и перевод речи</h1>
+    <p class="lead">Скачивание с YouTube и замена озвучки на перевод. Речь укладывается в те же интервалы, что распознал Whisper (паузы и длительность фраз совпадают с оригиналом по таймингу).</p>
 
-        <label for="quality">Выберите качество:</label>
-        <select id="quality" name="quality">
-            <option value="bestvideo+bestaudio/best">Лучшее качество</option>
-            <option value="bestvideo[height<=1080]+bestaudio">1080p</option>
-            <option value="bestvideo[height<=720]+bestaudio">720p</option>
-            <option value="worst">Низкое качество</option>
+    <form id="dl-form">
+        <label for="url">Ссылка на видео</label>
+        <input type="url" id="url" name="url" placeholder="https://www.youtube.com/watch?v=..." required>
+
+        <label for="media_type">Тип результата</label>
+        <select id="media_type" name="media_type">
+            <option value="video" selected>Видео с новой дорожкой</option>
+            <option value="audio">Только аудио (переведённая дорожка)</option>
         </select>
 
-        <button type="submit">Скачать</button>
+        <label for="quality">Качество видео (для «только аудио» не влияет на выбор потока — берётся лучший звук)</label>
+        <select id="quality" name="quality">
+            <option value="bestvideo+bestaudio/best">Лучшее качество</option>
+            <option value="bestvideo[height<=1080]+bestaudio/best">До 1080p</option>
+            <option value="bestvideo[height<=720]+bestaudio/best">До 720p</option>
+            <option value="worstvideo+bestaudio/worst">Низкое качество</option>
+        </select>
+
+        <label for="target_lang">Язык озвучки</label>
+        <select id="target_lang" name="target_lang">
+            <option value="none">Без перевода (только скачать)</option>
+        </select>
+
+        <button type="submit" id="submit-btn">Скачать</button>
     </form>
+
+    <div id="status" class="status" aria-live="polite"></div>
+    <div id="result" class="result hidden"></div>
 </div>
+<script>
+(function () {
+    const form = document.getElementById('dl-form');
+    const statusEl = document.getElementById('status');
+    const resultEl = document.getElementById('result');
+    const langSelect = document.getElementById('target_lang');
+    const submitBtn = document.getElementById('submit-btn');
+
+    const fallbackLangs = {
+        none: 'Без перевода (только скачать)',
+        ru: 'Русский',
+        en: 'English',
+        es: 'Spanish',
+        fr: 'French',
+        de: 'German'
+    };
+    var LANG_ORDER = ['none', 'ru', 'en', 'es', 'fr', 'de'];
+
+    function fillLanguages(map) {
+        var data = map && Object.keys(map).length ? map : fallbackLangs;
+        langSelect.innerHTML = '';
+        var ordered = LANG_ORDER.filter(function (k) {
+            return Object.prototype.hasOwnProperty.call(data, k);
+        });
+        var extra = Object.keys(data).filter(function (k) {
+            return ordered.indexOf(k) < 0;
+        });
+        var keys = ordered.concat(extra);
+        keys.forEach(function (code) {
+            var o = document.createElement('option');
+            o.value = code;
+            o.textContent = data[code];
+            langSelect.appendChild(o);
+        });
+        if (keys.indexOf('ru') >= 0) {
+            langSelect.value = 'ru';
+        }
+    }
+
+    function readJsonOrEmpty(r) {
+        return r.text().then(function (t) {
+            if (!t || !String(t).trim()) {
+                return {};
+            }
+            try {
+                return JSON.parse(t);
+            } catch (e) {
+                return {};
+            }
+        });
+    }
+
+    fetch('/languages')
+        .then(function (r) { return readJsonOrEmpty(r); })
+        .then(fillLanguages)
+        .catch(function () { fillLanguages(fallbackLangs); });
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        statusEl.textContent = 'Идёт загрузка и обработка — для длинного ролика это может занять много времени…';
+        resultEl.classList.add('hidden');
+        resultEl.innerHTML = '';
+        submitBtn.disabled = true;
+
+        const payload = {
+            url: document.getElementById('url').value.trim(),
+            quality: document.getElementById('quality').value,
+            media_type: document.getElementById('media_type').value,
+            target_lang: document.getElementById('target_lang').value
+        };
+
+        fetch('/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+            .then(function (r) {
+                return r.text().then(function (t) {
+                    var body = {};
+                    var raw = t ? String(t).trim() : '';
+                    if (raw) {
+                        try {
+                            body = JSON.parse(raw);
+                        } catch (parseErr) {
+                            body = {
+                                error: 'Ответ не JSON (HTTP ' + r.status + '): ' + raw.slice(0, 200)
+                            };
+                        }
+                    } else {
+                        body = {
+                            error: 'Пустой ответ сервера (HTTP ' + r.status + '). Часто это таймаут прокси — увеличьте лимит или открывайте UI на порту Flask (5001).'
+                        };
+                    }
+                    return { ok: r.ok, body: body };
+                });
+            })
+            .then(function (_ref) {
+                const ok = _ref.ok;
+                const body = _ref.body;
+                if (ok && body.filename) {
+                    statusEl.textContent = 'Готово.';
+                    const a = document.createElement('a');
+                    a.href = '/files/' + encodeURIComponent(body.filename);
+                    a.textContent = 'Скачать файл: ' + body.filename;
+                    a.className = 'download-link';
+                    resultEl.appendChild(a);
+                    resultEl.classList.remove('hidden');
+                } else {
+                    statusEl.textContent = 'Ошибка: ' + (body.error || 'неизвестно');
+                }
+            })
+            .catch(function (err) {
+                statusEl.textContent = 'Сеть или сервер: ' + err;
+            })
+            .finally(function () {
+                submitBtn.disabled = false;
+            });
+    });
+})();
+</script>
 </body>
 </html>
