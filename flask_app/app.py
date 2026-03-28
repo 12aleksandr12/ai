@@ -29,12 +29,13 @@ def _configure_cpu_threads() -> None:
 
 _configure_cpu_threads()
 
-from typing import Optional
+import asyncio
+import re
+from typing import Any, Optional
 
 from flask import Flask, request, jsonify, render_template, send_from_directory, abort
 from yt_dlp import YoutubeDL
 import uuid
-import re
 import subprocess
 import tempfile
 import whisper as ai_whisper  # noqa: E402 — после настройки потоков
@@ -123,6 +124,60 @@ GTTS_LANG_MAP = {
     "de": "de",
     "ru": "ru",
 }
+
+_TTS_VOICE_ID_RE = re.compile(r"^[a-z]{2}-[A-Z]{2}-[A-Za-z0-9._-]+$")
+
+
+def normalize_tts_voice_id(raw: Optional[str]) -> str:
+    v = (raw or "").strip()
+    if not v or v.lower() == "gtts":
+        return "gtts"
+    if not _TTS_VOICE_ID_RE.match(v):
+        logger.warning("Недопустимый id голоса TTS, используем Google TTS: %r", raw)
+        return "gtts"
+    return v
+
+
+def _edge_voice_label(v: dict[str, Any]) -> str:
+    short = str(v.get("ShortName") or "")
+    gender = str(v.get("Gender") or "").strip()
+    long_name = str(v.get("FriendlyName") or v.get("Name") or "").strip()
+    if long_name and len(long_name) < 96:
+        return f"{short} — {long_name}"
+    bits = [short]
+    if gender:
+        bits.append(gender)
+    return " · ".join(bits)
+
+
+async def _async_edge_voices_filtered(lang_code: str) -> list[dict[str, Any]]:
+    import edge_tts
+
+    lang = (lang_code or "en").lower().strip().split("-")[0][:2]
+    if len(lang) < 2:
+        lang = "en"
+    all_voices = await edge_tts.list_voices()
+    out: list[dict[str, Any]] = []
+    for v in all_voices:
+        loc = str(v.get("Locale") or "")
+        primary = loc.split("-")[0].lower() if loc else ""
+        if primary != lang:
+            continue
+        sn = str(v.get("ShortName") or "")
+        if not sn:
+            continue
+        out.append(v)
+    out.sort(
+        key=lambda x: (
+            0 if str(x.get("ShortName", "")).endswith("Neural") else 1,
+            str(x.get("ShortName", "")),
+        )
+    )
+    return out
+
+
+def list_edge_voices_for_lang(lang_code: str) -> list[dict[str, Any]]:
+    return asyncio.run(_async_edge_voices_filtered(lang_code))
 
 
 def normalize_target_lang(raw: Optional[str]) -> str:
@@ -373,7 +428,25 @@ def translate_segment(text: str, from_code: str, to_code: str) -> Optional[str]:
     return None
 
 
-def tts_to_wav(text: str, gtts_lang: str, out_wav: str) -> None:
+def tts_to_wav(text: str, gtts_lang: str, out_wav: str, tts_voice_id: str = "gtts") -> None:
+    vid = normalize_tts_voice_id(tts_voice_id)
+    if vid != "gtts":
+        tmp_edge = generate_unique_temp_filename(".mp3")
+        try:
+            import edge_tts
+
+            async def _edge_save() -> None:
+                await edge_tts.Communicate(text, vid).save(tmp_edge)
+
+            asyncio.run(_edge_save())
+            AudioSegment.from_mp3(tmp_edge).export(out_wav, format="wav")
+            return
+        except Exception as e:
+            logger.warning("Edge TTS (%s) недоступен, fallback Google TTS: %s", vid, e)
+        finally:
+            if os.path.isfile(tmp_edge):
+                os.remove(tmp_edge)
+
     tts = gTTS.gTTS(text=text, lang=gtts_lang)
     tmp_mp3 = generate_unique_temp_filename(".mp3")
     try:
@@ -390,6 +463,7 @@ def build_timeline_audio(
     source_lang: str,
     target_lang: str,
     gtts_lang: str,
+    tts_voice_id: str = "gtts",
 ) -> Optional[str]:
     """Собирает дорожку: паузы как в оригинале, речь в тех же интервалах (по длительности сегмента)."""
     pieces: list[AudioSegment] = []
@@ -430,7 +504,7 @@ def build_timeline_audio(
             raw_wav = generate_unique_temp_filename(".wav")
             fitted_wav = generate_unique_temp_filename(".wav")
             try:
-                tts_to_wav(translated, gtts_lang, raw_wav)
+                tts_to_wav(translated, gtts_lang, raw_wav, tts_voice_id)
                 fit_audio_to_duration_ms(raw_wav, dur_ms, fitted_wav)
                 chunk = AudioSegment.from_wav(fitted_wav)
             finally:
@@ -454,12 +528,14 @@ def build_timeline_audio(
     return out_opus
 
 
-def process_audio(audio_path: str, target_lang: str) -> tuple[Optional[str], Optional[str]]:
+def process_audio(
+    audio_path: str, target_lang: str, tts_voice_id: str = "gtts"
+) -> tuple[Optional[str], Optional[str]]:
     """
     Returns (path_to_opus_or_none, error_key).
     error_key: None при успехе; иначе короткий ключ для ответа API.
     """
-    logger.info("Обработка аудио: %s -> %s", audio_path, target_lang)
+    logger.info("Обработка аудио: %s -> %s (голос TTS: %s)", audio_path, target_lang, tts_voice_id)
     try:
         full_audio_path = os.path.normpath(os.path.abspath(audio_path))
         if not os.path.exists(full_audio_path):
@@ -497,7 +573,12 @@ def process_audio(audio_path: str, target_lang: str) -> tuple[Optional[str], Opt
             return None, "no_segments"
 
         timeline = build_timeline_audio(
-            full_audio_path, segments, source_lang, target_lang, gtts_lang
+            full_audio_path,
+            segments,
+            source_lang,
+            target_lang,
+            gtts_lang,
+            tts_voice_id,
         )
         if not timeline or not os.path.isfile(timeline):
             return None, "translation"
@@ -582,6 +663,25 @@ def get_languages():
     return jsonify(LANGUAGES)
 
 
+@app.route("/tts-voices", methods=["GET"])
+def tts_voices():
+    """Список голосов Edge TTS для языка озвучки + вариант Google TTS."""
+    lang = (request.args.get("lang") or "ru").strip().lower()
+    base = [{"id": "gtts", "label": "Google TTS (стандартный)"}]
+    if lang in ("none", "", "off"):
+        return jsonify({"voices": base})
+    try:
+        raw = list_edge_voices_for_lang(lang)
+        for v in raw:
+            sid = str(v.get("ShortName") or "")
+            if not sid:
+                continue
+            base.append({"id": sid, "label": _edge_voice_label(v)})
+    except Exception:
+        logger.exception("Не удалось получить список голосов Edge TTS для lang=%s", lang)
+    return jsonify({"voices": base})
+
+
 @app.route("/download", methods=["POST"])
 def download_video():
     if request.is_json:
@@ -592,6 +692,12 @@ def download_video():
     quality = data.get("quality")
     media_type = (data.get("media_type") or "video").lower()
     target_lang = normalize_target_lang(data.get("target_lang"))
+    tts_voice_raw = data.get("tts_voice")
+    tts_voice_id = (
+        "gtts"
+        if target_lang in ("none", "", "off")
+        else normalize_tts_voice_id(str(tts_voice_raw) if tts_voice_raw is not None else "gtts")
+    )
 
     if not url or not quality:
         return jsonify({"error": "Укажите URL и качество / формат"}), 400
@@ -687,7 +793,7 @@ def download_video():
                 return jsonify({"filename": os.path.basename(new_full)})
             return jsonify({"filename": os.path.basename(new_full)})
 
-        translated_audio, audio_err = process_audio(new_full, target_lang)
+        translated_audio, audio_err = process_audio(new_full, target_lang, tts_voice_id)
         if not translated_audio:
             msg = {
                 "translation": (

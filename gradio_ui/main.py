@@ -60,6 +60,42 @@ def language_dropdown_choices():
 def language_dropdown_default():
     return DEFAULT_TARGET_LANG if DEFAULT_TARGET_LANG in languages else "none"
 
+
+def fetch_tts_voice_tuple_list(lang_key):
+    """Пары (id, подпись) для Dropdown; при ошибке API — только Google TTS."""
+    if not lang_key or str(lang_key).lower() == "none":
+        return [("gtts", "Google TTS (стандартный)")]
+    try:
+        r = requests.get(
+            f"{FLASK_SERVER_URL}/tts-voices",
+            params={"lang": str(lang_key)},
+            timeout=45,
+        )
+        if r.status_code != 200:
+            return [("gtts", "Google TTS (стандартный)")]
+        data = _safe_response_json(r)
+        voices = data.get("voices") if isinstance(data, dict) else None
+        if not voices:
+            return [("gtts", "Google TTS (стандартный)")]
+        ch = [
+            (str(v["id"]), str(v["label"]))
+            for v in voices
+            if isinstance(v, dict) and v.get("id")
+        ]
+        return ch if ch else [("gtts", "Google TTS (стандартный)")]
+    except requests.RequestException:
+        return [("gtts", "Google TTS (стандартный)")]
+
+
+def tts_voice_gr_update(lang_key):
+    """Обновление выпадающего списка голосов при смене языка перевода."""
+    if not lang_key or str(lang_key).lower() == "none":
+        ch = [("gtts", "Google TTS (стандартный)")]
+        return gr.update(choices=ch, value="gtts", interactive=False)
+    ch = fetch_tts_voice_tuple_list(lang_key)
+    return gr.update(choices=ch, value=ch[0][0], interactive=True)
+
+
 def get_video_formats(url):
     """Список форматов из JSON yt-dlp (таблица -F зависит от локали/версии и ломала regex)."""
     u = (url or "").strip()
@@ -178,6 +214,14 @@ def create_download_interface():
             allow_custom_value=True,
         )
 
+        _voice_choices = fetch_tts_voice_tuple_list(language_dropdown_default())
+        voice_input = gr.Dropdown(
+            choices=_voice_choices,
+            value="gtts",
+            label="Голос озвучки (Microsoft Edge / Google)",
+            interactive=language_dropdown_default() != "none",
+        )
+
         # Кнопка скачивания (изначально скрыта)
         download_button = gr.Button("Скачать", interactive=False, visible=False)
 
@@ -199,11 +243,19 @@ def create_download_interface():
         url_input.change(enable_download_button, inputs=[url_input, quality_input], outputs=[download_button])
         quality_input.change(enable_download_button, inputs=[url_input, quality_input], outputs=[download_button])
 
+        target_lang_input.change(
+            fn=tts_voice_gr_update,
+            inputs=[target_lang_input],
+            outputs=[voice_input],
+        )
+
         # Обработчик для скачивания видео
         download_button.click(
-            fn=lambda url, quality, target_lang: download_video(url, quality, target_lang),
-            inputs=[url_input, quality_input, target_lang_input],
-            outputs=[output_text]
+            fn=lambda url, quality, target_lang, tts_voice: download_video(
+                url, quality, target_lang, tts_voice
+            ),
+            inputs=[url_input, quality_input, target_lang_input, voice_input],
+            outputs=[output_text],
         )
 
     return download_section
@@ -221,7 +273,7 @@ def clean_quality_string(quality):
     return quality_id, media_type
 
 # Функция для скачивания видео
-def download_video(url, quality, target_lang):
+def download_video(url, quality, target_lang, tts_voice=None):
     try:
         if not quality or _is_format_error_message(str(quality)):
             return "Сначала нажмите «Получить форматы» и выберите строку качества."
@@ -231,10 +283,17 @@ def download_video(url, quality, target_lang):
             if target_lang in (None, "none", "Без перевода", "Без перевода (только скачать)")
             else target_lang
         )
+        payload = {
+            "url": url,
+            "quality": quality_id,
+            "media_type": media_type,
+            "target_lang": lang,
+            "tts_voice": (tts_voice if tts_voice is not None else "gtts"),
+        }
         response = requests.post(
             f"{FLASK_SERVER_URL}/download",
-            json={"url": url, "quality": quality_id, "media_type": media_type, "target_lang": lang},
-            timeout=3600
+            json=payload,
+            timeout=3600,
         )
         data = _safe_response_json(response)
         if response.status_code == 200:
@@ -267,6 +326,14 @@ def main():
             allow_custom_value=True,
         )
 
+        _voice_choices_main = fetch_tts_voice_tuple_list(language_dropdown_default())
+        voice_input = gr.Dropdown(
+            choices=_voice_choices_main,
+            value="gtts",
+            label="Голос озвучки (Microsoft Edge / Google)",
+            interactive=language_dropdown_default() != "none",
+        )
+
         download_button = gr.Button("Скачать", interactive=False, visible=False)
         output_text = gr.Textbox(label="Статус")
 
@@ -285,10 +352,23 @@ def main():
         url_input.change(enable_download_button, inputs=[url_input, quality_input], outputs=[download_button])
         quality_input.change(enable_download_button, inputs=[url_input, quality_input], outputs=[download_button])
 
+        target_lang_input.change(
+            fn=tts_voice_gr_update,
+            inputs=[target_lang_input],
+            outputs=[voice_input],
+        )
+        demo.load(
+            fn=tts_voice_gr_update,
+            inputs=[target_lang_input],
+            outputs=[voice_input],
+        )
+
         download_button.click(
-            fn=lambda url, quality, target_lang: download_video(url, quality, target_lang),
-            inputs=[url_input, quality_input, target_lang_input],
-            outputs=[output_text]
+            fn=lambda url, quality, target_lang, tts_voice: download_video(
+                url, quality, target_lang, tts_voice
+            ),
+            inputs=[url_input, quality_input, target_lang_input, voice_input],
+            outputs=[output_text],
         )
 
     demo.launch(server_name="0.0.0.0", server_port=7860)

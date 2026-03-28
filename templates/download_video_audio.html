@@ -34,6 +34,11 @@
             <option value="none">Без перевода (только скачать)</option>
         </select>
 
+        <label for="tts_voice">Голос озвучки (Edge / Google)</label>
+        <select id="tts_voice" name="tts_voice">
+            <option value="gtts">Google TTS (стандартный)</option>
+        </select>
+
         <button type="submit" id="submit-btn">Скачать</button>
     </form>
 
@@ -46,6 +51,7 @@
     const statusEl = document.getElementById('status');
     const resultEl = document.getElementById('result');
     const langSelect = document.getElementById('target_lang');
+    const voiceSelect = document.getElementById('tts_voice');
     const submitBtn = document.getElementById('submit-btn');
 
     const fallbackLangs = {
@@ -77,6 +83,48 @@
         if (keys.indexOf('ru') >= 0) {
             langSelect.value = 'ru';
         }
+        refillVoices(langSelect.value);
+    }
+
+    function refillVoices(lang) {
+        voiceSelect.innerHTML = '';
+        if (!lang || lang === 'none') {
+            var o = document.createElement('option');
+            o.value = 'gtts';
+            o.textContent = 'Google TTS (стандартный)';
+            voiceSelect.appendChild(o);
+            voiceSelect.value = 'gtts';
+            voiceSelect.disabled = true;
+            return;
+        }
+        voiceSelect.disabled = true;
+        fetch('/tts-voices?lang=' + encodeURIComponent(lang))
+            .then(function (r) { return readJsonOrEmpty(r); })
+            .then(function (data) {
+                voiceSelect.innerHTML = '';
+                var voices = (data && data.voices) ? data.voices : [];
+                if (!voices.length) {
+                    voices = [{ id: 'gtts', label: 'Google TTS (стандартный)' }];
+                }
+                voices.forEach(function (v) {
+                    if (!v || !v.id) {
+                        return;
+                    }
+                    var opt = document.createElement('option');
+                    opt.value = v.id;
+                    opt.textContent = v.label || v.id;
+                    voiceSelect.appendChild(opt);
+                });
+                voiceSelect.disabled = false;
+            })
+            .catch(function () {
+                voiceSelect.innerHTML = '';
+                var o = document.createElement('option');
+                o.value = 'gtts';
+                o.textContent = 'Google TTS (стандартный)';
+                voiceSelect.appendChild(o);
+                voiceSelect.disabled = false;
+            });
     }
 
     function readJsonOrEmpty(r) {
@@ -97,6 +145,10 @@
         .then(fillLanguages)
         .catch(function () { fillLanguages(fallbackLangs); });
 
+    langSelect.addEventListener('change', function () {
+        refillVoices(langSelect.value);
+    });
+
     form.addEventListener('submit', function (e) {
         e.preventDefault();
         statusEl.textContent = 'Идёт загрузка и обработка — для длинного ролика это может занять много времени…';
@@ -108,7 +160,8 @@
             url: document.getElementById('url').value.trim(),
             quality: document.getElementById('quality').value,
             media_type: document.getElementById('media_type').value,
-            target_lang: document.getElementById('target_lang').value
+            target_lang: document.getElementById('target_lang').value,
+            tts_voice: document.getElementById('tts_voice').value
         };
 
         fetch('/download', {
