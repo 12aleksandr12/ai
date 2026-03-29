@@ -61,10 +61,21 @@ def language_dropdown_default():
     return DEFAULT_TARGET_LANG if DEFAULT_TARGET_LANG in languages else "none"
 
 
+def _default_tts_voice_id(choices):
+    """Предпочитаем id gtts; в gr.Dropdown кортеж — (подпись, значение), значение — второй элемент."""
+    if not choices:
+        return "gtts"
+    for _label, vid in choices:
+        if vid == "gtts":
+            return "gtts"
+    return choices[0][1]
+
+
 def fetch_tts_voice_tuple_list(lang_key):
-    """Пары (id, подпись) для Dropdown; при ошибке API — только Google TTS."""
+    """Пары (подпись, id) для gr.Dropdown — как в документации Gradio: (name, value). При ошибке API — только Google TTS."""
+    fallback = [("Google TTS (стандартный)", "gtts")]
     if not lang_key or str(lang_key).lower() == "none":
-        return [("gtts", "Google TTS (стандартный)")]
+        return fallback
     try:
         r = requests.get(
             f"{FLASK_SERVER_URL}/tts-voices",
@@ -72,28 +83,28 @@ def fetch_tts_voice_tuple_list(lang_key):
             timeout=45,
         )
         if r.status_code != 200:
-            return [("gtts", "Google TTS (стандартный)")]
+            return fallback
         data = _safe_response_json(r)
         voices = data.get("voices") if isinstance(data, dict) else None
         if not voices:
-            return [("gtts", "Google TTS (стандартный)")]
+            return fallback
         ch = [
-            (str(v["id"]), str(v["label"]))
+            (str(v.get("label") or v.get("id") or ""), str(v.get("id", "")).strip())
             for v in voices
-            if isinstance(v, dict) and v.get("id")
+            if isinstance(v, dict) and str(v.get("id", "")).strip()
         ]
-        return ch if ch else [("gtts", "Google TTS (стандартный)")]
+        return ch if ch else fallback
     except requests.RequestException:
-        return [("gtts", "Google TTS (стандартный)")]
+        return fallback
 
 
 def tts_voice_gr_update(lang_key):
     """Обновление выпадающего списка голосов при смене языка перевода."""
     if not lang_key or str(lang_key).lower() == "none":
-        ch = [("gtts", "Google TTS (стандартный)")]
+        ch = [("Google TTS (стандартный)", "gtts")]
         return gr.update(choices=ch, value="gtts", interactive=False)
     ch = fetch_tts_voice_tuple_list(lang_key)
-    return gr.update(choices=ch, value=ch[0][0], interactive=True)
+    return gr.update(choices=ch, value=_default_tts_voice_id(ch), interactive=True)
 
 
 def get_video_formats(url):
@@ -217,7 +228,7 @@ def create_download_interface():
         _voice_choices = fetch_tts_voice_tuple_list(language_dropdown_default())
         voice_input = gr.Dropdown(
             choices=_voice_choices,
-            value="gtts",
+            value=_default_tts_voice_id(_voice_choices),
             label="Голос озвучки (Microsoft Edge / Google)",
             interactive=language_dropdown_default() != "none",
         )
@@ -329,7 +340,7 @@ def main():
         _voice_choices_main = fetch_tts_voice_tuple_list(language_dropdown_default())
         voice_input = gr.Dropdown(
             choices=_voice_choices_main,
-            value="gtts",
+            value=_default_tts_voice_id(_voice_choices_main),
             label="Голос озвучки (Microsoft Edge / Google)",
             interactive=language_dropdown_default() != "none",
         )
